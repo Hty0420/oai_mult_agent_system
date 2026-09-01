@@ -1,0 +1,54 @@
+帮我从骨关节炎MRI影像和掩码中提取影像组学特征，需要提取2名患者的5个区域信息，输入文件为D:\oai_mcp\labels.csv，输出文件为D:\oai_mcp\radiomics_results\radiomics_features_summary.csv。再统计2名患者的生物标志物信息，输出文件为D:\oai_mcp\biomarker_statistics_results。最后对输出的影像组学特征文件进行特征选择，将特征选择的结果保存在D:\oai_mcp\radiomics_results\selected_features.csv。
+
+
+# lasso
+帮我从骨关节炎MRI影像和掩码中提取影像组学特征，需要提取20名患者的5个区域信息，输入文件为D:\oai_mcp\labels.csv，输出文件为D:\oai_mcp\radiomics_results\radiomics_features_summary.csv。再对影像组学特征文件使用LASSO进行KOA等级分类，输入文件为D:\oai_mcp\all_radiomics_results\radiomics_features_summary.csv,输出到文件夹D:\oai_mcp\KOA_lasso_results中
+帮我从骨关节炎MRI影像和掩码中提取影像组学特征，需要提取75名患者的5个区域信息，输入文件为D:\oai_mcp\labels.csv，输出文件为D:\oai_mcp\radiomics_results\radiomics_features_summary.csv。再对输出的影像组学特征文件使用LASSO进行KOA等级分类，输出到文件夹D:\oai_mcp\KOA_lasso_results中
+
+#MEAS
+帮我做骨关节炎MRI影像的MEAS特征提取,输入文件在D:\oai_mcp\labels.csv,输出保存在D:\oai_mcp
+
+#LASSO Radiomics
+帮我使用LASSO对KOA进行特征选择（分区域以及不分区域）和二分类，训练文件为D:\oai_mcp\datasets\radiomics_features_summary\train_radiomics_features_summary.csv，测试文件为D:\oai_mcp\datasets\radiomics_features_summary\test_radiomics_features_summary.csv，分区域输出在D:\oai_mcp\KOA_lasso_results\radiomics_by_region,不分区域输出在D:\oai_mcp\KOA_lasso_results\radiomics
+
+# Gradio
+使用我刚上传的文件，从骨关节炎MRI影像和掩码中提取影像组学特征，需要提取2名患者的5个区域信息，输出到D:\oai_mcp\results\radiomics_results\radiomics_features_summary.csv。
+使用我刚上传的文件,帮我做骨关节炎MRI影像的MEAS特征提取以及LDSE特征提取,输出保存在D:\oai_mcp\results
+对于我刚上传的2个文件,帮我做骨关节炎MRI影像的LDSE特征提取,训练文件输出保存在D:\oai_mcp\results\ldse_train,测试文件输出保存在D:\oai_mcp\results\ldse_test，两个输出文件名均为ldse_features_summary.csv。再基于LDSE特征，使用LASSO进行特征选择以及分类
+
+# 多步
+对于我刚上传的2个文件,帮我做骨关节炎MRI影像的LDSE特征提取,训练文件输出保存在D:\oai_mcp\results\ldse_train,测试文件输出保存在D:\oai_mcp\results\ldse_test，两个输出文件名均为ldse_features_summary.csv。
+基于刚才输出的LDSE特征，使用LASSO进行特征选择以及分类
+帮我读取LASSO分类结果
+
+# 多步
+对于我刚上传的2个文件,帮我做骨关节炎MRI影像的MEAS特征提取,训练文件输出保存在D:\oai_mcp\results\meas_train,测试文件输出保存在D:\oai_mcp\results\meas_test，两个输出文件名均为meas_features_summary.csv。
+基于刚才输出的MEAS特征，使用LASSO进行特征选择以及分类
+帮我读取LASSO分类结果,并做一个简要的分析
+
+#帮我使用filter算法，对Radiomics特征进行分类和选择
+
+不按区域，对二二组合、三三组合的影像组学特征，使用lasso进行特征选择和分类。其中训练集路径为"comb_datasets/split_train"，测试集路径为"comb_datasets/split_test",输出路径为"comb_lasso_radiomics_results/all"
+按区域，对二二组合、三三组合的影像组学特征，使用lasso进行特征选择和分类。其中训练集路径为"comb_datasets/split_train_by_region"，测试集路径为"comb_datasets/split_test_by_region",输出路径为"comb_lasso_radiomics_results"
+
+#
+帮我使用LASSO对KOA进行特征选择（分区域以及不分区域）和二分类，训练文件为D:\oai_mcp\datasets\radiomics_features_summary\train_radiomics_features_summary.csv，测试文件为D:\oai_mcp\datasets\radiomics_features_summary\test_radiomics_features_summary.csv，分区域输出在D:\oai_mcp\KOA_lasso_results\radiomics_by_region,不分区域输出在D:\oai_mcp\KOA_lasso_results\radiomics
+
+
+对经过组合的影像组学特征使用LASSO分类，训练集为comb_datasets/split_train，测试集为comb_datasets/split_test。输出保存在results
+分区域，对经过组合的影像组学特征使用LASSO分类，训练集为comb_datasets/split_train_by_region，测试集为comb_datasets/split_test_by_region，输出保存在results/lasso_by_region
+
+测试流程
+1 #上传MRI影像文件，prompt：分割MRI
+2 #上传labels_test文件，prompt:提取2个患者，5个区域的影像组学特征
+3 #上传labels_test文件，prompt:提取MEAS特征
+4 #上传labels_test文件，prompt:提取LDSE特征
+5 #上传radiomics_train和radiomics_test的特征文件，prompt：使用LASSO分类
+6 #上传radiomics_train和radiomics_test的特征文件，prompt：使用Filter分类
+7 #prompt:读取LASSO分类报告
+7 #prompt:读取Filter分类报告
+8 #上传datasets/radiomics_features_all_summary/split_test_radiomics_features文件夹下的4个影像组学特征文件。prompt：不按区域，对影像组学特征进行组合
+9 #上传datasets/radiomics_features_all_summary/split_test_radiomics_features文件夹下的4个影像组学特征文件。prompt：按区域，对影像组学特征进行组合
+10 #不按区域，对二二组合、三三组合的影像组学特征，使用lasso进行特征选择和分类。其中训练集路径为"comb_datasets/split_train"，测试集路径为"comb_datasets/split_test",输出路径为"comb_lasso_radiomics_results/all"
+11 #按区域，对二二组合、三三组合的影像组学特征，使用lasso进行特征选择和分类。其中训练集路径为"comb_datasets/split_train_by_region"，测试集路径为"comb_datasets/split_test_by_region",输出路径为"comb_lasso_radiomics_results"
+

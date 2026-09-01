@@ -1,0 +1,24 @@
+{
+    "mcpServers": {
+        "auto_experiment": {
+            "command": "python",
+            "args": ["server/auto_experiment_server.py"]
+        },
+        "comb_radiomics_features_lasso": {
+            "command": "python",
+            "args": ["server/lasso_class_features_server.py"]
+        },
+        "cartilage_analysis": {
+            "command": "python",
+            "args": ["server/cartilage_analysis_server.py"]
+        },
+        "biomarker_discovery": {
+            "command": "python",
+            "args": ["server/biomarker_discovery_server.py"]
+        },
+        "web_search": {
+            "command": "python",
+            "args": ["server/web_search_server.py"]
+        }
+    }
+}

@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0",
+  "constitution_id": "oa-agent-self-optimization-constitution",
+  "version": "1.0.0",
+  "status": "active",
+  "immutable_controls": {
+    "research_only": true,
+    "autonomous_diagnosis_prohibited": true,
+    "treatment_recommendation_prohibited": true,
+    "patient_specific_decision_prohibited": true,
+    "external_write_requires_scoped_approval": true,
+    "tool_permissions_are_not_optimizer_mutable": true,
+    "hard_gates_are_not_optimizer_mutable": true,
+    "evaluation_sets_are_not_optimizer_mutable": true,
+    "self_activation_prohibited": true,
+    "final_test_tuning_prohibited": true
+  },
+  "candidate_contract": {
+    "policy_type": "multi_agent_shadow_candidate",
+    "allowed_methods": [
+      "MEAS:LASSO",
+      "LDSE:LASSO",
+      "Radiomics:LASSO",
+      "MEAS:Filter",
+      "LDSE:Filter",
+      "Radiomics:Filter"
+    ],
+    "allowed_use_mode": "shadow_only",
+    "production_activation_allowed": false,
+    "minimum_comparable_methods": 2,
+    "minimum_matched_runs_per_method": 2,
+    "required_learning_partition": "train",
+    "required_scope_fields": ["user_id", "workspace_id", "agent_version", "data_partitions"]
+  },
+  "lifecycle": {
+    "transitions": {
+      "draft": ["shadow", "retired"],
+      "shadow": ["canary", "retired", "rolled_back"],
+      "canary": ["active", "retired", "rolled_back"],
+      "active": ["rolled_back", "retired"],
+      "rolled_back": ["shadow", "retired"],
+      "retired": []
+    },
+    "required_gates": {
+      "shadow": ["candidate_config_valid", "evaluation_set_registered", "rollback_ready"],
+      "canary": ["paired_shadow_replay_passed", "human_review_completed", "rollback_ready"],
+      "active": ["canary_evaluation_passed", "independent_verification", "hard_gates_passed", "rollback_ready"],
+      "retired": ["retirement_reason_recorded"],
+      "rolled_back": []
+    },
+    "approval_required_for": ["shadow", "canary", "active", "retired"],
+    "approval_scope": "policy_transition",
+    "authorized_approver_roles": ["research_owner", "safety_reviewer"]
+  },
+  "evaluation": {
+    "required_partition": "validation",
+    "final_test_is_read_only": true,
+    "paired_shadow_replay_required": true,
+    "independent_verification_required_for_active": true
+  }
+}

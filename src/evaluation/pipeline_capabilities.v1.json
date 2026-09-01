@@ -1,0 +1,139 @@
+{
+  "schema_version": "1.0",
+  "registry_id": "kl-pipeline-capabilities",
+  "version": "1.1.0",
+  "status": "active",
+  "objective_variant": "binary_koa_from_kl_threshold",
+  "selection_policy": {
+    "version": "1.1.0",
+    "history_weight": 0.45,
+    "registry_prior_weight": 0.45,
+    "cost_weight": 0.10,
+    "llm_tie_tolerance": 0.02
+  },
+  "search_policy": {
+    "version": "1.1.0",
+    "mode": "balanced",
+    "cold_start_max_candidates": 3,
+    "experienced_max_candidates": 2,
+    "min_history_runs_for_exploitation": 5,
+    "validation_scope": "training_only_nested_grouped_cv",
+    "validation_metric_weights": {
+      "AUC": 0.70,
+      "PR_AUC": 0.20,
+      "F1": 0.10
+    },
+    "validation_tie_tolerance": 0.01,
+    "min_successful_trials": 1
+  },
+  "pipelines": [
+    {
+      "candidate_id": "MEAS_LASSO",
+      "feature_type": "MEAS",
+      "classification_method": "LASSO",
+      "model_recipe": "L1_LOGISTIC",
+      "recipe_config": {
+        "imputer": "median",
+        "scaler": "standard",
+        "selector": "embedded_l1",
+        "estimator": "logistic_regression",
+        "hyperparameters": {"C": [0.01, 0.1, 1.0, 10.0, 100.0]}
+      },
+      "required_columns": ["CaseID", "ImagePath", "MaskPath", "KLGrade"],
+      "agents": ["FEATURE_EXTRACTION_AGENT", "CLASSIFICATION_AGENT"],
+      "tools": ["meas_features_extraction", "koa_lasso_classification", "read_classification_results"],
+      "registry_prior": 0.72,
+      "cost_rank": 2
+    },
+    {
+      "candidate_id": "LDSE_LASSO",
+      "feature_type": "LDSE",
+      "classification_method": "LASSO",
+      "model_recipe": "L1_LOGISTIC",
+      "recipe_config": {
+        "imputer": "median",
+        "scaler": "standard",
+        "selector": "embedded_l1",
+        "estimator": "logistic_regression",
+        "hyperparameters": {"C": [0.01, 0.1, 1.0, 10.0, 100.0]}
+      },
+      "required_columns": ["CaseID", "MaskPath", "KLGrade"],
+      "agents": ["FEATURE_EXTRACTION_AGENT", "CLASSIFICATION_AGENT"],
+      "tools": ["ldse_train_test_features_extraction", "koa_lasso_classification", "read_classification_results"],
+      "registry_prior": 0.68,
+      "cost_rank": 1
+    },
+    {
+      "candidate_id": "RADIOMICS_LASSO",
+      "feature_type": "Radiomics",
+      "classification_method": "LASSO",
+      "model_recipe": "L1_LOGISTIC",
+      "recipe_config": {
+        "imputer": "median",
+        "scaler": "standard",
+        "selector": "embedded_l1",
+        "estimator": "logistic_regression",
+        "hyperparameters": {"C": [0.01, 0.1, 1.0, 10.0, 100.0]}
+      },
+      "required_columns": ["CaseID", "ImagePath", "MaskPath", "KLGrade"],
+      "agents": ["FEATURE_EXTRACTION_AGENT", "CLASSIFICATION_AGENT"],
+      "tools": ["extract_radiomics_features", "koa_lasso_classification", "read_classification_results"],
+      "registry_prior": 0.64,
+      "cost_rank": 4
+    },
+    {
+      "candidate_id": "MEAS_FILTER",
+      "feature_type": "MEAS",
+      "classification_method": "Filter",
+      "model_recipe": "ANOVA_TOPK_L2",
+      "recipe_config": {
+        "imputer": "median",
+        "scaler": "standard_after_selection",
+        "selector": "anova_f_top_k",
+        "estimator": "l2_logistic_regression",
+        "hyperparameters": {"k": [5, 10, "all"], "C": [0.1, 1.0, 10.0]}
+      },
+      "required_columns": ["CaseID", "ImagePath", "MaskPath", "KLGrade"],
+      "agents": ["FEATURE_EXTRACTION_AGENT", "CLASSIFICATION_AGENT"],
+      "tools": ["meas_features_extraction", "koa_filter_classification", "read_classification_results"],
+      "registry_prior": 0.62,
+      "cost_rank": 2
+    },
+    {
+      "candidate_id": "LDSE_FILTER",
+      "feature_type": "LDSE",
+      "classification_method": "Filter",
+      "model_recipe": "ANOVA_TOPK_L2",
+      "recipe_config": {
+        "imputer": "median",
+        "scaler": "standard_after_selection",
+        "selector": "anova_f_top_k",
+        "estimator": "l2_logistic_regression",
+        "hyperparameters": {"k": [5, 10, "all"], "C": [0.1, 1.0, 10.0]}
+      },
+      "required_columns": ["CaseID", "MaskPath", "KLGrade"],
+      "agents": ["FEATURE_EXTRACTION_AGENT", "CLASSIFICATION_AGENT"],
+      "tools": ["ldse_train_test_features_extraction", "koa_filter_classification", "read_classification_results"],
+      "registry_prior": 0.58,
+      "cost_rank": 1
+    },
+    {
+      "candidate_id": "RADIOMICS_FILTER",
+      "feature_type": "Radiomics",
+      "classification_method": "Filter",
+      "model_recipe": "ANOVA_TOPK_L2",
+      "recipe_config": {
+        "imputer": "median",
+        "scaler": "standard_after_selection",
+        "selector": "anova_f_top_k",
+        "estimator": "l2_logistic_regression",
+        "hyperparameters": {"k": [5, 10, "all"], "C": [0.1, 1.0, 10.0]}
+      },
+      "required_columns": ["CaseID", "ImagePath", "MaskPath", "KLGrade"],
+      "agents": ["FEATURE_EXTRACTION_AGENT", "CLASSIFICATION_AGENT"],
+      "tools": ["extract_radiomics_features", "koa_filter_classification", "read_classification_results"],
+      "registry_prior": 0.54,
+      "cost_rank": 4
+    }
+  ]
+}

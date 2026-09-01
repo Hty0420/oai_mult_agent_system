@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0",
+  "registry_id": "mri-biomarker-discovery-capabilities",
+  "version": "1.1.0",
+  "status": "active",
+  "task_type": "BIOMARKER_DISCOVERY",
+  "objective_variant": "cross_sectional_ordinal_kl_association",
+  "research_only": true,
+  "clinical_use_prohibited": true,
+  "endpoint": {
+    "column": "KLGrade",
+    "scale": "ordinal_0_4",
+    "excluded_values": [-1, null]
+  },
+  "unit_of_analysis": "knee",
+  "fixed_pipeline": {
+    "pipeline_id": "CARTILAGE_THICKNESS_ORDINAL_KL_V1",
+    "feature_type": "CartilageThickness",
+    "feature_definition": [
+      "3D-MN global cartilage-thickness measurements",
+      "Wirth/Eckstein 16 subregion cartilage-thickness measurements"
+    ],
+    "agents": [
+      "FEATURE_EXTRACTION_AGENT",
+      "BIOMARKER_DISCOVERY_AGENT",
+      "BIOMARKER_VERIFIER_AGENT",
+      "BIOMARKER_REPORTER_AGENT"
+    ],
+    "tools": [
+      "extract_cartilage_thickness_features",
+      "run_biomarker_discovery",
+      "audit_biomarker_discovery"
+    ],
+    "required_source_columns": [
+      "CaseID",
+      "MaskPath",
+      "KLGrade"
+    ],
+    "optional_adjustment_columns": [
+      "Age",
+      "Gender",
+      "BMI",
+      "KneeSide"
+    ]
+  },
+  "analysis_contract": {
+    "model": "proportional_odds_cumulative_logit",
+    "effect": "odds ratio for a higher KL grade per training-standard-deviation feature increase",
+    "discovery_split": "train_only",
+    "discovery_multiplicity": "Benjamini-Hochberg FDR",
+    "discovery_alpha": 0.05,
+    "correlation_pruning": "absolute Spearman rho >= 0.90",
+    "bootstrap_directional_support": 0.70,
+    "candidate_freeze_required": true,
+    "confirmation_split": "frozen_test_only",
+    "confirmation_multiplicity": "Holm FWER",
+    "confirmation_alpha": 0.05,
+    "direction_concordance_required": true,
+    "negative_result_is_valid_completion": true,
+    "natural_language_reporting": {
+      "source": "independently_audited_structured_facts_only",
+      "fixed_wording_prohibited": true,
+      "numeric_and_direction_validation_required": true,
+      "safety_fallback": "deterministic_summary_after_two_failed_drafts"
+    }
+  },
+  "unsupported_claims": [
+    "causal biomarker",
+    "longitudinal progression biomarker",
+    "surrogate endpoint",
+    "clinical diagnostic biomarker",
+    "external validation without an independent cohort"
+  ]
+}

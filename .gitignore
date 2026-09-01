@@ -1,0 +1,40 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment (keep .env.example)
+.env
+
+# Datasets and uploads
+src/datasets/
+src/comb_datasets/
+src/augment_datasets_train/
+src/augment_datasets_test/
+src/user_upload_file/
+user_upload_file/
+
+# Local runtime data and generated artifacts
+src/biomarker_runs/
+tmp/
+*.inspect.ndjson
+
+# Local-only configuration (keep sanitized examples)
+src/db_utils/db_config.json
+.claude/settings.local.json
+
+# Local agent workflow artifacts
+.superpowers/
+
+# IDE
+.idea/
+.vscode/
+
+# Misc
+.pytest_cache/
