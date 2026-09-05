@@ -29,13 +29,14 @@
 
 ### MCP 工具服务器
 
-系统启动时以 stdio 子进程方式启动 4 个 MCP 服务器：
+当前 `src/server_config.json` 配置了 5 个 MCP 服务器，通过 stdio 子进程连接：
 
 | 服务器 | 主要工具 |
 |---|---|
 | `auto_experiment_server` | 3 种分割模型、影像组学/MEAS/LDSE 特征提取、LASSO/Filter 分类、数据增强、特征质量评估、报告读取 |
 | `lasso_class_features_server` | 影像组学特征组合（按区域 / 不按区域）、组合特征批量 LASSO |
 | `cartilage_analysis_server` | 六分类分割校验、3D-MN/16 亚区分析、患者级厚度特征批量提取、三维表面网格导出 |
+| `biomarker_discovery_server` | KL 0–4 候选生物标志物发现、训练/测试确认和独立审计 |
 | `web_search_server` | 智谱 AI 网络搜索 |
 
 ## 功能概览
@@ -64,21 +65,7 @@
 - 单病例输出包括全局 CSV、16 亚区 CSV、JSON，以及可选的三类厚度 NIfTI 和 1–16 亚区标签 NIfTI。
 - 算法输入标签固定为：0 背景、1 股骨、2 股骨软骨、3 胫骨、4 内侧胫骨软骨、5 外侧胫骨软骨。
 
-#### 软骨厚度 MCP 验收
-
-在项目根目录运行聚焦测试：
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q `
-  tests\test_cartilage_analysis_tools.py `
-  tests\test_cartilage_natural_language_routing.py
-```
-
-运行全量回归：
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-```
+#### 软骨厚度工具任务验收
 
 从 `src` 目录启动系统后，可直接输入以下自然语言任务：
 
@@ -140,6 +127,24 @@
 
 批量工具通过统一的 MCP progress 通道上报进度，Agent 编排层将进度转发到后台任务记录，前端每秒轮询并同时显示在当前对话回复和任务状态栏。进度行采用 20 格百分比条，并按工具覆盖旧值，避免处理数百个病例时堆积大量历史进度。当前已接入软骨厚度、MEAS、Radiomics、LDSE、离线数据增强、在线增强特征提取和候选生物标志物统计分析；以后任何发送标准 MCP progress notification 的工具会自动获得相同的前端展示，无需再次修改页面。
 
+### 科学轨迹图与报告
+
+任务进入终态后，系统根据结构化执行记录生成科学轨迹产物，包括任务判定、数据划分、候选方案、Agent/工具执行、产物来源、科学门禁和复现信息。执行失败或校验未通过的任务也会尝试生成报告，报告中会标明失败或待复核状态。
+
+默认目录为 `output/scientific_trajectory_graphs/<workspace_id>/<trace_id>/`：
+
+| 文件 | 用途 |
+|---|---|
+| `scientific_trajectory.png` | 右侧结果区域的轨迹概览图 |
+| `scientific_trajectory.md` | 右侧“科学轨迹报告”和可下载的 Markdown 报告 |
+| `scientific_trajectory.json` | 保存结构化证据、图节点、连线和产物哈希的清单 |
+
+可在 `.env` 中设置 `SCIENTIFIC_TRAJECTORY_DIR` 调整存储目录，建议使用绝对路径。生成的报告属于本地运行产物，默认不提交到 Git。
+
+报告仍会在任务结束后生成。前端轮询只检查后台状态，内容变化时才更新报告组件，避免每秒进入等待状态造成明暗闪烁。新任务运行时隐藏旧报告，完成后显示新报告；重新打开历史会话时会恢复该会话最新任务的报告。Gradio 5.x 的报告状态轮询使用队列事件，确保首次显示和后续更新均能触发。
+
+图表生成异常会记录为 `scientific_trajectory_graph_error`，不会改变任务本身的完成判定。轨迹报告的详细字段和登记方式见 [轨迹与离线优化说明](docs/trajectory-optimization.md)。
+
 ## 日常任务驱动的离线优化
 
 每个请求会生成独立的 `task_fingerprint`、确定性完成门禁、规则反馈和
@@ -165,13 +170,15 @@ python -m db_utils.offline_optimizer `
 ## 项目结构
 
 ```
-oai_mcp_linux/
+oai_multi_agent_system_new/
 ├── src/
 │   ├── app.py                          # FastAPI + Gradio 应用入口
 │   ├── oai_client.py                   # OAI_ChatBot：会话管理、历史、记忆
+│   ├── llm_config.py                   # 统一读取配置并创建 LLM 客户端
 │   ├── server_config.json              # MCP 服务器启动配置
 │   ├── agents/
 │   │   ├── orchestrator.py             # LangGraph StateGraph 编排定义
+│   │   ├── scientific_trajectory_graph.py # 科学轨迹图、报告与结构化清单
 │   │   ├── orchestrator_agent.py       # 多步骤任务规划智能体
 │   │   ├── router_agent.py             # 查询路由智能体
 │   │   ├── segmentation_agent.py       # MRI 分割智能体
@@ -182,11 +189,12 @@ oai_mcp_linux/
 │   │   ├── web_search_agent.py         # 网络搜索智能体
 │   │   ├── tool_manager.py            # MCP 工具连接管理器
 │   │   ├── state.py                    # AgentState 类型定义
-│   │   └── config.py                   # 各智能体 LLM 配置
+│   │   └── config.py                   # 各智能体参数，共用统一 LLM 配置
 │   ├── server/
 │   │   ├── auto_experiment_server.py   # 主 MCP 服务器（分割、提取、分类）
 │   │   ├── lasso_class_features_server.py # 特征组合 MCP 服务器
 │   │   ├── cartilage_analysis_server.py # 3D-MN/16亚区软骨厚度 MCP 服务
+│   │   ├── biomarker_discovery_server.py # 候选标志物发现与审计
 │   │   └── web_search_server.py        # 网络搜索 MCP 服务器
 │   ├── algorithm/
 │   │   ├── cartilage_thickness/         # 厚度核心算法、16亚区算法和文件服务边界
@@ -199,7 +207,9 @@ oai_mcp_linux/
 │   │   └── db_config.json              # MySQL 连接配置
 │   └── env_utils/
 │       └── env_util.py                 # 环境变量加载器
-├── .env.example                        # 环境变量模板
+├── llm_config.json                     # 模型、接口、密钥变量名和请求参数
+├── .env.example                        # 密钥及其他环境变量模板
+├── tests/                              # 自动化回归测试
 ├── .gitignore
 ├── pyproject.toml                      # 项目配置与依赖
 └── README.md
@@ -212,41 +222,63 @@ oai_mcp_linux/
 - **Python** >= 3.12
 - **MySQL** 8.0+（用于用户账户和对话历史存储）
 - **Microsoft Visual C++ Build Tools**（仅 Windows，pyradiomics 编译需要）
-- **Ollama** 或其他兼容 OpenAI API 的 LLM 端点
+- **DeepSeek** 或其他兼容 OpenAI API 的 LLM 端点及对应密钥
 
 ### 1. 克隆项目并安装依赖
 
 ```bash
-git clone https://github.com/Hccccy2002/oai_agent_system.git
-cd oai_agent_system
+git clone https://github.com/Hccccy2002/oai_multi_agent_system_new.git
+cd oai_multi_agent_system_new
 
 # 使用 uv（推荐）
-uv sync
-
-# 或使用 pip
-pip install -r requirements.txt
+uv sync --locked
 ```
 
-### 2. 配置环境变量
+依赖以 `pyproject.toml` 和 `uv.lock` 为准，其中 PyRadiomics 固定到源码标签 `v3.1.0`。请使用同一个虚拟环境安装依赖、启动应用和运行测试。
+
+### 2. 配置 LLM 和环境变量
 
 ```bash
 cp .env.example .env
-# 编辑 .env 文件，填入你的 API Key 和端点地址
+# 编辑 .env 文件，填入你的 API Key
 ```
 
-必需的环境变量：
+项目根目录的 `llm_config.json` 是单智能体客户端和全部 9 个智能体的统一模型配置入口，默认沿用 DeepSeek：
+
+```json
+{
+  "model": "deepseek-v4-pro",
+  "base_url": "https://api.deepseek.com",
+  "api_key_env": "DEEPSEEK_API_KEY",
+  "timeout": 600,
+  "max_retries": 2
+}
+```
+
+- `model`：模型名称；`base_url`：对应的 OpenAI 兼容 API 地址。
+- `api_key_env`：保存密钥的环境变量名称，实际密钥写在项目根目录 `.env` 中，例如 `DEEPSEEK_API_KEY=你的密钥`。进程环境中的同名变量优先。
+- `timeout`：每次请求的超时秒数；`max_retries`：失败后的最大重试次数。
+
+切换模型时，在这个 JSON 文件中同时修改 `model`、`base_url` 和 `api_key_env`，并确保对应密钥已配置。**修改后重启应用和后台工作进程。** 配置按进程加载一次，从根目录或 `src/` 启动都会读取同一文件。
+
+旧的 `MODEL_NAME`、`OPENAI_BASE_URL`、`DEEPSEEK_BASE_URL` 不再控制这些 LLM 调用；`OAI_ChatBot(model=...)` 也不再允许指定与统一配置不同的模型。各智能体原有的 temperature 保持不变。
+
+环境变量：
 
 | 变量 | 说明 |
 |---|---|
-| `OPENAI_API_KEY` | LLM API 密钥（必填） |
-| `OPENAI_BASE_URL` | LLM API 基础地址（必填） |
-| `MODEL_NAME` | 模型名称（默认 `gpt-4.1-mini`） |
+| `DEEPSEEK_API_KEY` | 默认配置所需的 DeepSeek 密钥 |
+| `OPENAI_API_KEY` | 使用该密钥时，将 JSON 中的 `api_key_env` 改为此名称 |
 | `ZHIPU_API_KEY` | 智谱 AI 密钥（网络搜索需要） |
 | `LANGSMITH_API_KEY` | LangSmith 追踪（可选） |
 
 ### 3. 配置 MySQL 数据库
 
-编辑 `src/db_utils/db_config.json`：
+先复制数据库配置模板，再编辑 `src/db_utils/db_config.json`：
+
+```bash
+cp src/db_utils/db_config.example.json src/db_utils/db_config.json
+```
 
 ```json
 {
@@ -270,25 +302,27 @@ CREATE DATABASE mcp_chatbot CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 Windows 系统需要安装 Visual Studio Build Tools 才能编译 pyradiomics：
 
-1. 访问 https://visualstudio.microsoft.com/visual-cpp-build-tools/
+1. 访问 [Microsoft Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)。
 2. 下载并安装，勾选 **"使用 C++ 的桌面开发"** 工作负载
 3. 确保选中 MSVC v143 和 Windows 10/11 SDK
 4. 安装完成后重启终端，执行：
 
 ```bash
-pip install --no-build-isolation pyradiomics==3.0.1
+uv sync --locked
 ```
 
 ## 使用方式
 
 ### 启动应用
 
-```bash
+```powershell
 cd src
-python app.py
+..\.venv\Scripts\python.exe app.py
 ```
 
-应用启动后访问 **http://127.0.0.1:7860**：
+Linux/macOS 在 `src` 目录下使用 `../.venv/bin/python app.py`。
+
+应用启动后访问 [本地工作台](http://127.0.0.1:7860)：
 
 | 路径 | 页面 |
 |---|---|
@@ -296,6 +330,8 @@ python app.py
 | `/login` | 用户登录 |
 | `/register` | 用户注册 |
 | `/chat` | 聊天主界面 |
+
+首次进入工作区时，页面最多等待工具连接 1.5 秒；超过这段等待时间会显示“工具正在后台连接”，工具继续在后台接入，成功后状态栏自动更新为“工具已连接”。这段页面等待时间不代表 MCP 连接超时。正在运行或已完成的任务状态优先显示，工具列表也可通过“刷新连接状态”按钮重新获取。
 
 ### 工作流示例
 
@@ -366,128 +402,40 @@ ldse_features_extraction(..., mode="transform", dataset_role="test", model_path=
 - 软骨厚度 MCP 服务使用 SimpleITK 读取 NIfTI，并显式将 `[z,y,x]` 转为算法要求的 `[D,H,W]`；不要绕过服务边界直接传 SimpleITK 数组。
 - 系统使用 `nest_asyncio` 支持 LangGraph 同步执行模型内的异步 MCP 调用
 - 记忆摘要机制：保留最近 2 轮对话的完整内容，更早的消息被 LLM 压缩为 JSON 摘要并持久化到 MySQL
-- 所有智能体通过 `ChatOpenAI` 接入 LLM，`OPENAI_BASE_URL` 可配置，兼容任何 OpenAI-API 兼容端点
+- 所有智能体通过 `ChatOpenAI` 接入 LLM，并与单智能体客户端共用根目录 `llm_config.json` 中的模型、接口地址和密钥来源
 
+## 回归测试
 
+在项目根目录运行本次配置与界面修复的聚焦测试：
 
-## 2. 环境配置
-
-Python 版本要求为 >= 3.12。本次验证在 Python 3.11.7 兼容性环境中完成，不代表正式支持版本下限。
-
-### 2.1 安装的包
-```python
-pip install python-dotenv mcp openai
-pip install pandas
-pip install gradio==5.49.0
-pip install itsdangerous
-# 更新 pip、setuptools、wheel
-pip install --upgrade pip setuptools wheel
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests/test_llm_config.py tests/test_trajectory_report_refresh.py tests/test_tool_connection_status.py
 ```
 
-### 2.2 安装 pyradiomics
+三组测试共 28 项，覆盖单智能体与多智能体配置一致性、密钥来源与配置校验、科学轨迹报告首次显示/更新/会话切换，以及工具慢连接、真实失败和状态自动更新。测试使用模拟请求、连接状态和数据库，不要求调用真实 LLM 或启动真实 MCP 工具。
 
-```bash
-#pip install pyradiomics 可能报错 用下一条命令
-pip install --no-build-isolation pyradiomics==3.0.1
-还会报错，安装 Microsoft Visual C++ Build Tools
-你必须安装 Visual Studio Build Tools（含 C++ 构建组件） 才能编译 pyradiomics。
-✔ 官方地址（安全）
-👉 https://visualstudio.microsoft.com/visual-cpp-build-tools/
-进入页面后：
-      1. 下载“Build Tools for Visual Studio”
-          页面上会看到 “Download Build Tools” 按钮，点它。
-      2. 安装时必须勾选以下组件：
-         进入安装界面后，选：
-            📌 “使用 C++ 的桌面开发”
-            也叫：
-            Desktop development with C++
-            使用 C++ 的桌面开发
-            并确保勾选以下选项：
-            ✔ MSVC v143 或 v142 C++ 编译器工具集
-            ✔ Windows 10/11 SDK
-            ✔ C++ CMake tools
-            ✔ C++ ATL/MFC（可选）
-            保持默认即可，大约 2~3GB。
-      3. 安装结束后，重启终端 / 重启电脑（非常重要）
-         再使用 pip install --no-build-isolation pyradiomics==3.0.1 这个命令
-            pip install matplotlib scikit-learn shap
-            pip install pymysql
-            pip install requests
-            pip install langchain==0.3.27 langchain-core==0.3.72 langchain-community==0.3.27 langgraph==0.6.0
-            pip install nest_asyncio
-            pip install langchain_openai
-            pip install zai-sdk
-            pip install monai
-```
+历史用例 `tests/test_biomarker_contracts.py::test_default_dataset_and_fixed_four_role_plan_are_materialized` 依赖 `src/datasets/labels_train.csv` 和 `labels_test.csv`，并固定断言原批次的行数。该数据集未随仓库分发，因此在干净检出的仓库运行全量测试时，这一用例会因缺少数据而失败。本次上传内容的全量检查结果为 50 项通过、上述 1 项失败。
 
-```
-LDSE + LASSO 
-LDSE + Filter
-MEAS + LASSO 
-MEAS + Filter 都通过
+## 常见问题
 
-cd autodl-tmp/U-Mamba #使用U-Mamba模型
-cd autodl-tmp/LKM-UNet #使用LKM-UNet模型
-cd autodl-tmp/LightM-UNet #使用LightM-UNet模型
-uvicorn server:app --host 0.0.0.0 --port 8000 #开启代理，远端代理到本地的8000端口
-```
+| 现象 | 检查与处理 |
+|---|---|
+| 修改模型后仍调用旧接口 | 同时检查根目录 `llm_config.json` 的 `model`、`base_url`、`api_key_env`，确认对应密钥已设置，重启应用后再提交任务。 |
+| 刚进入工作区显示工具正在连接 | 等待后台接入完成，状态栏会自动更新；如最终显示连接失败，再检查控制台中的具体异常。 |
+| 科学轨迹报告暂时不可见 | 当前任务等待或运行时会隐藏报告；任务结束后检查输出文件中是否有 `scientific_trajectory.md`，以及控制台是否记录轨迹生成异常。 |
+| 更新代码后仍闪烁或报告不显示 | 完整重启应用并刷新浏览器，确保加载新的报告状态轮询与显示事件。已生成的文件会保留。 |
+| 模型接口报 `Connection error` 或 SSL EOF | 检查 `llm_config.json` 中的接口地址、启动进程的代理和网络连通性；模型切换与网络连接分别排查。 |
 
-```
-  已完成的变更总结
+## 2026-09-05 更新
 
-  新建文件 (5个)
+- 将单智能体客户端和 9 个 LLM 智能体统一到 `llm_config.json`，默认沿用 `deepseek-v4-pro`；密钥从 `.env` 或进程环境读取。
+- 增加科学轨迹 PNG、Markdown 和 JSON 产物，以及右侧报告展示和下载支持。
+- 修复报告持续明暗闪烁，并补齐 Gradio 5.x 队列状态事件，保证报告首次显示和后续更新。
+- 修复 Python 3.10 中页面等待超时被误判为工具连接失败的问题；后台连接完成后自动更新状态。
+- 补充会话中间件依赖 `itsdangerous`。
+- 上述三组聚焦回归测试共 28 项通过；慢连接提示与报告显示流程另在 Python 3.10.20 / Gradio 5.49.0 既有环境中做了兼容性验证。新安装环境仍以项目声明的 Python >= 3.12 为准。
 
-  ┌───────────────────────────────────┬─────────────────────────────────────────────────────────────────────┐
-  │               文件                │                                用途                                 │
-  ├───────────────────────────────────┼─────────────────────────────────────────────────────────────────────┤
-  │ src/db_utils/error_categorizer.py │ 纯函数错误分类器 — 8种分类 + unknown                                │
-  ├───────────────────────────────────┼─────────────────────────────────────────────────────────────────────┤
-  │ src/db_utils/experiment_etl.py    │ 实验指标ETL — 解析LASSO manifest JSON并入库                         │
-  ├───────────────────────────────────┼─────────────────────────────────────────────────────────────────────┤
-  │ src/db_utils/analysis_queries.py  │ 7个分析SQL查询（路由混淆矩阵、工具错误率、Agent性能、实验排行榜等） │
-  ├───────────────────────────────────┼─────────────────────────────────────────────────────────────────────┤
-  │ tests/test_error_categorizer.py   │ 32个测试覆盖所有错误分类                                            │
-  ├───────────────────────────────────┼─────────────────────────────────────────────────────────────────────┤
-  │ tests/test_experiment_etl.py      │ 16个测试覆盖ETL解析逻辑                                             │
-  └───────────────────────────────────┴─────────────────────────────────────────────────────────────────────┘
-
-  修改文件 (6个)
-
-  ┌──────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────┐
-  │               文件               │                                   关键变更                                    │
-  ├──────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
-  │ src/db_utils/db_utils.py         │ trace_id 自动生成 + 传播；3张新表；error_category 列；plan_json               │
-  │                                  │ 列；try/finally 修复连接泄漏                                                  │
-  ├──────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
-  │ src/agents/state.py              │ AgentState 增加 trace_id 字段                                                 │
-  ├──────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
-  │ src/agents/tool_manager.py       │ _log_tool_call 写入 trace_id +                                                │
-  │                                  │ error_category；预检查异常也纳入日志（之前静默丢失）                          │
-  ├──────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
-  │ src/agents/router_agent.py       │ 路由日志写入 trace_id；try/finally 防连接泄漏                                 │
-  ├──────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
-  │ src/agents/orchestrator.py       │ 初始化状态注入 trace_id；_async_wrapper 增加Agent执行耗时记录 →               │
-  │                                  │ agent_execution_log                                                           │
-  ├──────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
-  │ src/agents/orchestrator_agent.py │ plan_json 入库；task_steps 逐步骤记录；错误分类标记                           │
-  ├──────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────┤
-  │ src/oai_client.py                │ 单智能体模式工具调用现在写入 tool_calls_log（修复gap #7）                     │
-  └──────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────┘
-
-  DB变更（幂等，_create_tables 自动执行）
-
-  - 新表：agent_execution_log（Agent级耗时和成功率）、task_steps（编排步骤明细）、experiment_results（分类指标结构化，按
-  SHA-256去重）
-  - 补列：trace_id 加入 tool_calls_log、agent_routing_log、tasks；error_category 加入 tool_calls_log、tasks；plan_json +
-  routed_agent 加入 tasks
-
-
-可以在LDSE + LASSO之后,再进行MEAS + LASSO.
-当用户说：“基于我上传的数据，完成 KL 分级任务” ，agent会进行几次组合，选择“最优”的组合来完成任务
-
-增加了任务反馈，任务完成后可以手动输入对任务的满意度和反馈意见等
-修改了前端界面UI
-```
+以下为历史更新记录；其中测试数量和环境描述对应各记录当时的版本。
 
 ## 2026-08-24 本次会话更新总结
 

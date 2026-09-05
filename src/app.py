@@ -1,4 +1,6 @@
 import asyncio
+from concurrent.futures import wait as wait_for_futures
+import hashlib
 import threading
 import os
 import shutil
@@ -7,6 +9,7 @@ import gradio as gr
 import queue
 import time
 import uuid
+from pathlib import Path
 
 from oai_client import OAI_ChatBot
 from db_utils.db_utils import DatabaseManager
@@ -17,6 +20,7 @@ from mesh_visualization import (
     collect_structured_output_files,
     find_mesh_manifest,
     MeshRefreshTracker,
+    UIRefreshTracker,
 )
 from agents.tool_progress import append_progress_text, progress_line_key
 from system_capabilities import render_system_capabilities
@@ -48,6 +52,8 @@ background_submission_lock = threading.Lock()
 background_execution_lock = None
 MAX_PERSISTED_PROGRESS_CHARS = 60000
 mesh_refresh_tracker = MeshRefreshTracker()
+gallery_refresh_tracker = UIRefreshTracker()
+trajectory_report_refresh_tracker = UIRefreshTracker()
 
 # ================== 登录逻辑 ==================
 def login(username, password):
@@ -212,13 +218,153 @@ def parse_chart_data(response):
     return _deduplicate_charts(charts)
 
 
+def _scientific_trajectory_charts(output_files):
+    """Keep the terminal trajectory visible first in the right-hand gallery."""
+    charts = []
+    for path in output_files or []:
+        normalized = str(path or "").strip()
+        if (
+            os.path.isfile(normalized)
+            and os.path.basename(normalized).lower() == "scientific_trajectory.png"
+        ):
+            charts.append({"type": "file", "path": normalized})
+    return charts
+
+
+def _file_refresh_identity(file_path):
+    if not file_path:
+        return None
+    candidate = Path(str(file_path)).expanduser()
+    try:
+        resolved = candidate.resolve(strict=True)
+        stat = resolved.stat()
+        return (
+            os.path.normcase(str(resolved)),
+            int(stat.st_mtime_ns),
+            int(stat.st_size),
+        )
+    except OSError:
+        return (os.path.normcase(os.path.abspath(str(candidate))),)
+
+
+def _gallery_content_identity(session_id, images):
+    items = []
+    for value in images or []:
+        text = str(value or "")
+        if text.startswith("data:image"):
+            items.append(
+                ("embedded", hashlib.sha256(text.encode("utf-8")).hexdigest())
+            )
+        else:
+            items.append(("file", _file_refresh_identity(text)))
+    return str(session_id or ""), tuple(items)
+
+
+def _scientific_trajectory_report_path(output_files):
+    """Resolve only a generated report inside the configured artifact root."""
+    configured_root = os.getenv("SCIENTIFIC_TRAJECTORY_DIR")
+    report_root = (
+        Path(configured_root).expanduser()
+        if configured_root
+        else Path(__file__).resolve().parents[1]
+        / "output"
+        / "scientific_trajectory_graphs"
+    ).resolve()
+    for raw_path in reversed(list(output_files or [])):
+        candidate = Path(str(raw_path or "")).expanduser()
+        if candidate.name.lower() != "scientific_trajectory.md":
+            continue
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(report_root)
+        except (OSError, ValueError):
+            continue
+        if not resolved.is_file():
+            continue
+        return str(resolved)
+    return None
+
+
+def _scientific_trajectory_report_text(report_path):
+    """Read a previously validated, privacy-safe generated report."""
+    if not report_path:
+        return ""
+    try:
+        return Path(report_path).read_text(encoding="utf-8")[:200000]
+    except (OSError, UnicodeError):
+        return ""
+
+
+def refresh_scientific_trajectory_report(
+    session_id,
+    request: gr.Request = None,
+):
+    """Poll report data into State, without putting Markdown into pending mode."""
+    hidden = {"session_id": str(session_id or ""), "text": ""}
+    client_id = getattr(request, "session_hash", None) or f"session:{session_id}"
+    if not is_initialized or global_chatbot is None or not session_id:
+        identity = (str(session_id or ""), "unavailable", None, None)
+        return (
+            hidden
+            if trajectory_report_refresh_tracker.claim(client_id, identity)
+            else gr.update()
+        )
+    db = DatabaseManager()
+    try:
+        if not db.session_belongs_to_workspace(
+            global_chatbot.user_id,
+            global_chatbot.workspace_id,
+            session_id,
+        ):
+            identity = (str(session_id), "invalid", None, None)
+            return (
+                hidden
+                if trajectory_report_refresh_tracker.claim(client_id, identity)
+                else gr.update()
+            )
+        latest_run = db.get_latest_session_background_task(
+            global_chatbot.user_id,
+            global_chatbot.workspace_id,
+            session_id,
+        )
+    finally:
+        db.close()
+    status = str((latest_run or {}).get("status") or "missing")
+    job_id = str((latest_run or {}).get("job_id") or "")
+    report_path = _scientific_trajectory_report_path(
+        (latest_run or {}).get("output_files") or []
+    )
+    identity = (
+        str(session_id),
+        status,
+        job_id,
+        _file_refresh_identity(report_path),
+    )
+    if not trajectory_report_refresh_tracker.claim(client_id, identity):
+        return gr.update()
+    if status in {"missing", "pending", "running"} or not report_path:
+        return hidden
+    report_text = _scientific_trajectory_report_text(report_path)
+    return {"session_id": str(session_id), "text": report_text}
+
+
+def render_scientific_trajectory_report(report_state, session_id):
+    """Touch the visible report only when this browser's report data changes."""
+    report_state = report_state or {}
+    if report_state.get("session_id", "") != str(session_id or ""):
+        # A poll started before the user switched sessions may finish later.
+        return gr.skip()
+    report_text = report_state.get("text") or ""
+    return gr.update(value=report_text, visible=bool(report_text))
+
+
 def load_default_image():
     # 始终返回不可见状态，不加载任何默认图片
-    return gr.update(visible=False), []
+    return gr.update(value=[], visible=False), []
 
 def load_charts(charts):
     if not charts:
-        return gr.update(visible=False), []
+        return gr.update(value=[], visible=False), []
     images = []
     # Keep this second boundary defensive: callers other than
     # parse_chart_data may also provide repeated chart entries.
@@ -234,7 +380,16 @@ def load_charts(charts):
         columns, rows, height = 1, 2, 620
     else:
         columns, rows, height = 1, min(count, 3), 680
-    return gr.update(visible=True, columns=columns, rows=rows, height=height), images
+    return (
+        gr.update(
+            value=images,
+            visible=True,
+            columns=columns,
+            rows=rows,
+            height=height,
+        ),
+        images,
+    )
 
 
 # ================== 文件解析 ==================
@@ -640,6 +795,23 @@ def _active_task_status(active_run, current_session_id=None):
     return f"任务{label} · {location}{progress_suffix} · 完成前不可提交新任务"
 
 
+def _tool_connection_status(chatbot_instance=None):
+    """Report the actual background connection outcome without waiting for it."""
+    chatbot_instance = chatbot_instance or global_chatbot
+    future = getattr(chatbot_instance, "tool_connection_future", None)
+    if future is None:
+        return None
+    if not future.done():
+        return "工作台已就绪 · 工具正在后台连接"
+    try:
+        future.result()
+    except Exception as exc:
+        detail = str(exc) or type(exc).__name__
+        return f"工作台已载入 · 工具连接失败：{detail}"
+    tool_count = len(chatbot_instance.available_tools)
+    return f"工作台已就绪 · 工具已连接（{tool_count} 个）"
+
+
 def initialize_chatbot():
     global global_chatbot, loop, is_initialized, current_user, current_session_id, current_workspace_id
     if is_initialized:
@@ -659,7 +831,7 @@ def initialize_chatbot():
             (
                 _active_task_status(active_run, global_chatbot.session_id)
                 if active_run
-                else runtime_status or "聊天机器人已经初始化"
+                else runtime_status or _tool_connection_status() or "聊天机器人已经初始化"
             ),
             gr.update(choices=choices, value=global_chatbot.workspace_id),
             workspace_dashboard_markdown(),
@@ -701,25 +873,23 @@ def initialize_chatbot():
 
     async def connect():
         await chatbot_instance.connect_to_servers()
-        return f"系统已初始化 · 用户：{current_user} · 工作区：个人工作区"
 
     future = asyncio.run_coroutine_threadsafe(connect(), loop)
+    chatbot_instance.tool_connection_future = future
     is_initialized = True
-    try:
-        result = future.result(timeout=1.5)
-    except TimeoutError:
-        result = f"工作台已就绪 · 用户：{current_user} · 工具正在后台连接"
 
-        def report_background_connection(done_future):
-            try:
-                done_future.result()
-            except Exception as exc:
-                print(f"后台工具连接失败: {exc or type(exc).__name__}")
+    def report_background_connection(done_future):
+        try:
+            done_future.result()
+        except Exception as exc:
+            print(f"后台工具连接失败: {exc or type(exc).__name__}")
 
-        future.add_done_callback(report_background_connection)
-    except Exception as e:
-        detail = str(e) or type(e).__name__
-        result = f"工作台已载入 · 部分工具连接失败：{detail}"
+    future.add_done_callback(report_background_connection)
+    # This is a UI wait budget, not an MCP connection timeout. In Python 3.10,
+    # concurrent.futures.TimeoutError is distinct from builtin TimeoutError.
+    # wait() avoids confusing that wait expiration with a failed connection.
+    wait_for_futures([future], timeout=1.5)
+    result = _tool_connection_status(chatbot_instance)
     pairs, runtime_status, _, _, _ = _session_runtime_view(
         user_id, current_workspace_id, current_session_id
     )
@@ -1724,7 +1894,10 @@ def _session_runtime_view(user_id, workspace_id, session_id):
                 output_files.append(path)
 
     output_files = [path for path in output_files if os.path.exists(path)]
-    charts = parse_chart_data(combined_output)
+    charts = _deduplicate_charts(
+        _scientific_trajectory_charts(output_files)
+        + parse_chart_data(combined_output)
+    )
     gallery_update, chart_images = load_charts(charts)
     download_update = gr.update(
         visible=bool(output_files),
@@ -1965,7 +2138,7 @@ def start_background_task(query, history, files=None, selected_session_id=None):
     )
 
 
-def poll_current_session(session_id):
+def poll_current_session(session_id, request: gr.Request = None):
     if not is_initialized or global_chatbot is None:
         input_update, file_update = _composer_updates(enabled=False)
         return (
@@ -1982,7 +2155,7 @@ def poll_current_session(session_id):
                 (
                     _active_task_status(active_run)
                     if active_run
-                    else gr.update()
+                    else _tool_connection_status() or gr.update()
                 ),
                 gr.update(), gr.update(), gr.update(), gr.update(),
                 input_update, file_update,
@@ -2005,12 +2178,17 @@ def poll_current_session(session_id):
             session_id,
         )
     )
+    client_id = getattr(request, "session_hash", None) or f"session:{session_id}"
+    gallery_identity = _gallery_content_identity(session_id, chart_images)
+    if not gallery_refresh_tracker.claim(client_id, gallery_identity):
+        gallery_update = gr.update()
+        chart_images = gr.update()
     return (
         pairs,
         (
             _active_task_status(active_run, session_id)
             if active_run
-            else status or gr.update()
+            else status or _tool_connection_status() or gr.update()
         ),
         _session_selector_state(session_id),
         gallery_update,
@@ -2420,6 +2598,14 @@ body, .gradio-container {
 }
 .trajectory-overview h3 { margin-top: 0 !important; font-size: 13px !important; }
 .trajectory-overview table { width: 100%; font-size: 10px; }
+.scientific-trajectory-report {
+    max-height: 680px; overflow: auto; padding: 12px 14px !important;
+    border: 1px solid var(--line) !important; border-radius: 12px !important;
+    background: var(--surface-soft) !important;
+}
+.scientific-trajectory-report h1 { margin-top: 0 !important; font-size: 17px !important; }
+.scientific-trajectory-report h2 { font-size: 14px !important; }
+.scientific-trajectory-report table { font-size: 11px; }
 .system-capability-accordion { border-color: var(--line) !important; border-radius: 12px !important; }
 .system-capability-accordion > .label-wrap { font-size: 12px !important; font-weight: 720 !important; }
 .capability-overview {
@@ -2775,6 +2961,15 @@ with gr.Blocks(
                     label="分析图表", elem_id="gallery", columns=1, rows=2,
                     height=520, visible=False, object_fit="contain",
                 )
+                gallery_images_state = gr.State(value=[])
+                scientific_trajectory_report_state = gr.State(
+                    value={"session_id": "", "text": ""}
+                )
+                scientific_trajectory_report = gr.Markdown(
+                    "",
+                    visible=False,
+                    elem_classes="scientific-trajectory-report",
+                )
                 file_download = gr.Dropdown(
                     label="输出文件", interactive=True, visible=False
                 )
@@ -2888,7 +3083,8 @@ with gr.Blocks(
         inputs=[workspace_selector],
         outputs=[
             chatbot, status_text, workspace_dashboard, file_download,
-            history_session_selector, user_input, file_input, gallery, gallery,
+            history_session_selector, user_input, file_input, gallery,
+            gallery_images_state,
         ],
     )
     workspace_event.then(
@@ -2906,10 +3102,11 @@ with gr.Blocks(
     workspace_outputs = [
         workspace_selector, chatbot, status_text, workspace_dashboard,
         file_download, history_session_selector, user_input, file_input,
-        gallery, gallery,
+        gallery, gallery_images_state,
     ]
     session_outputs = [
-        chatbot, status_text, history_session_selector, gallery, gallery,
+        chatbot, status_text, history_session_selector, gallery,
+        gallery_images_state,
         file_download, user_input, file_input,
     ]
     history_session_event = history_session_selector.input(
@@ -3012,7 +3209,7 @@ with gr.Blocks(
             user_input, chatbot, file_input, history_session_selector,
         ],
         outputs=[
-            chatbot, user_input, gallery, gallery, file_download,
+            chatbot, user_input, gallery, gallery_images_state, file_download,
             workspace_dashboard, status_text, history_session_selector,
             file_input,
         ],
@@ -3030,9 +3227,31 @@ with gr.Blocks(
         poll_current_session,
         inputs=[history_session_selector],
         outputs=[
-            chatbot, status_text, history_session_selector, gallery, gallery,
+            chatbot, status_text, history_session_selector, gallery,
+            gallery_images_state,
             file_download, user_input, file_input,
         ],
+        show_progress="hidden",
+        queue=False,
+    )
+    # Markdown dims itself whenever it is an event output, even with hidden
+    # progress and an empty gr.update(). Keep periodic requests on State; its
+    # change event runs only when the report payload actually changes.
+    # Gradio 5.x only forwards changed_state_ids over its queued event stream.
+    # A queue=False poll updates State on the server but never renders it.
+    session_poll_timer.tick(
+        refresh_scientific_trajectory_report,
+        inputs=[history_session_selector],
+        outputs=[scientific_trajectory_report_state],
+        show_progress="hidden",
+        queue=True,
+    )
+    scientific_trajectory_report_state.change(
+        render_scientific_trajectory_report,
+        inputs=[scientific_trajectory_report_state, history_session_selector],
+        outputs=[scientific_trajectory_report],
+        show_progress="hidden",
+        queue=False,
     )
     mesh_refresh_timer.tick(
         refresh_session_mesh_view,
@@ -3042,6 +3261,8 @@ with gr.Blocks(
             mesh_manifest_state,
         ],
         outputs=mesh_view_outputs,
+        show_progress="hidden",
+        queue=False,
     )
     # Only an actual user click may rebuild the viewer.  ``change`` also fires
     # for the checkbox updates returned by the one-second polling callback,

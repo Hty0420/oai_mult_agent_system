@@ -101,6 +101,38 @@ same trace and evaluator version, so writes are idempotent.
 The task evaluator currently records evidence and exposes it in the API result;
 it does not self-modify or automatically promote a production policy.
 
+## Scientific trajectory graph artifact
+
+Every terminal task, whether successful or requiring review, now produces three
+adjacent artifacts under
+`output/scientific_trajectory_graphs/<workspace_id>/<trace_id>/` by default:
+
+- `scientific_trajectory.png`: a compact vertical graph displayed first in the
+  right-hand result gallery;
+- `scientific_trajectory.md`: a structured evidence report displayed beside the
+  graph in the right-hand panel;
+- `scientific_trajectory.json`: the versioned machine-readable graph used for
+  later replay, attribution, and experience extraction.
+
+Schema v2 records the data split and distributions, structured planning basis,
+candidate metrics and uncertainty, Agent/tool timing, artifact lineage,
+deterministic gate evidence, failure boundaries, reproducibility fields, and a
+non-authoritative learning candidate. Missing model, prompt, tool, code,
+environment, and random-seed versions are stated as unavailable instead of
+being inferred. A successful run may only create an experience candidate; it is
+never automatically written into long-term memory without cross-task validation
+and human review.
+
+All three artifacts deliberately exclude raw prompts, tool arguments, patient
+identifiers, artifact filenames, and filesystem paths. They are registered in
+`artifact_registry`; the PNG and Markdown report point to the JSON manifest as
+their source artifact, and `artifact_registered` events preserve the audit
+trail. A rendering or registration error is non-authoritative and never changes
+the scientific task result.
+
+Set `SCIENTIFIC_TRAJECTORY_DIR` to move the persistent root. The generated
+directory is runtime data and is ignored by Git.
+
 The initial development catalog is
 `src/evaluation/task_catalog.v1.json`. It contains 20 normal and injected-failure
 scenarios and is deliberately marked `draft`; independent human review and a

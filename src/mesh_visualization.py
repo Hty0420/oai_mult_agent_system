@@ -25,7 +25,7 @@ MESH_LABEL_NAMES_ZH = {
 
 _OUTPUT_EXTENSIONS = (
     "nii.gz", "nii", "csv", "txt", "json", "png", "jpg", "jpeg",
-    "gif", "zip", "npz", "ply", "stl",
+    "gif", "md", "zip", "npz", "ply", "stl",
 )
 _OUTPUT_EXTENSION_PATTERN = "|".join(
     re.escape(extension) for extension in _OUTPUT_EXTENSIONS
@@ -35,6 +35,27 @@ _DIRECT_OUTPUT_KEYS = (
     "manifest_path", "global_csv", "subregion_csv", "analysis_json",
     "subregion_mask",
 )
+
+
+class UIRefreshTracker:
+    """Claim changing UI identities once per browser page."""
+
+    def __init__(self, max_clients: int = 512):
+        self._max_clients = max(1, int(max_clients))
+        self._identities: dict[str, Any] = {}
+        self._lock = threading.Lock()
+
+    def claim(self, client_id: str, identity: Any) -> bool:
+        key = str(client_id or "anonymous")
+        with self._lock:
+            if key in self._identities and self._identities[key] == identity:
+                return False
+            self._identities.pop(key, None)
+            self._identities[key] = identity
+            while len(self._identities) > self._max_clients:
+                oldest = next(iter(self._identities))
+                self._identities.pop(oldest, None)
+        return True
 
 
 class MeshRefreshTracker:

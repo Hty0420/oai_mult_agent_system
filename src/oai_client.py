@@ -9,7 +9,6 @@ import inspect
 import os
 import sys
 from pathlib import Path
-from openai import OpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 
 load_dotenv()
@@ -23,7 +22,7 @@ from db_utils.trajectory import (
 )
 from db_utils.error_categorizer import categorize_error
 from db_utils.workspace_memory import render_workspace_memory_context
-from env_utils.env_util import OPENAI_API_KEY, OPENAI_BASE_URL
+from llm_config import get_llm_config
 import time
 
 # Import multi-agent system
@@ -40,23 +39,22 @@ class ToolDefinition(TypedDict):
 class OAI_ChatBot:
     def __init__(
         self,
-        model="gpt-5.1",
+        model=None,
         username="default_user",
         use_multi_agent=True,
         workspace_id=None,
         agent_version=None,
     ):
+        llm_config = get_llm_config()
+        if model is not None and model != llm_config.model:
+            raise ValueError("请在 llm_config.json 中统一配置模型，避免单智能体与多智能体配置不一致。")
         # 初始化会话和客户端对
         self.sessions: List[ClientSession] = []  # 存储所有服务器会话
         self.exit_stack = AsyncExitStack()  # 用于管理异步资源的上下文栈
         self.available_tools: List[ToolDefinition] = []  # 可用工具列表
         self.tool_to_session: Dict[str, ClientSession] = {}  # 工具到会话的映射
-        self.model = model
-        
-        self.client = OpenAI(
-            api_key=OPENAI_API_KEY,
-            base_url=OPENAI_BASE_URL
-        )
+        self.model = llm_config.model
+        self.client = llm_config.create_client()
         
         # 添加对话历史属性
         self.chat_history = []

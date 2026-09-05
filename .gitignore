@@ -22,6 +22,8 @@ user_upload_file/
 
 # Local runtime data and generated artifacts
 src/biomarker_runs/
+output/scientific_trajectory_graphs/
+output/*.log
 tmp/
 *.inspect.ndjson
 

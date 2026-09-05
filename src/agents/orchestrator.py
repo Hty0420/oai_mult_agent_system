@@ -36,6 +36,7 @@ from db_utils.db_utils import (
 )
 from db_utils.trajectory import (
     assign_trajectory_partition,
+    build_artifact_record,
     build_trajectory_event,
     current_policy_id,
     stable_json_hash,
@@ -61,6 +62,10 @@ from .task_contracts import (
     build_checkpoint_config,
     infer_task_spec,
     required_agent_for_task,
+)
+from .scientific_trajectory_graph import (
+    generate_scientific_trajectory_graph,
+    scientific_trajectory_response_appendix,
 )
 
 # Load configuration
@@ -673,6 +678,31 @@ class MultiAgentOrchestrator:
                         str(run_result.get("output", "")) + verification_notice
                     )
 
+            # A terminal task always receives a privacy-safe visual trajectory.
+            # This is a post-run explanatory artifact: a rendering failure must
+            # never change the scientific completion result itself.
+            try:
+                trajectory_graph = generate_scientific_trajectory_graph(
+                    run_result,
+                    trace_id=run_id,
+                    workspace_id=ctx.get("workspace_id"),
+                    agent_version=ctx.get("agent_version"),
+                    policy_id=(
+                        run_result.get("policy_id") or initial_state["policy_id"]
+                    ),
+                    data_partition=data_partition,
+                )
+                run_result["scientific_trajectory_graph"] = trajectory_graph
+                run_result["output"] = (
+                    str(run_result.get("output", ""))
+                    + scientific_trajectory_response_appendix(trajectory_graph)
+                )
+            except Exception as graph_error:
+                run_result["scientific_trajectory_graph_error"] = (
+                    str(graph_error) or type(graph_error).__name__
+                )
+                print(f"[Orchestrator] 生成科学轨迹图失败: {graph_error}")
+
             evaluation_db = None
             try:
                 evaluation_ctx = get_request_context()
@@ -680,6 +710,94 @@ class MultiAgentOrchestrator:
                     evaluation_db = DatabaseManager()
                     persist_task_evaluation(evaluation_db, report)
                     task_id = run_result.get("task_id")
+
+                    trajectory_graph = run_result.get(
+                        "scientific_trajectory_graph"
+                    ) or {}
+                    if trajectory_graph:
+                        try:
+                            source_artifact_ids = [
+                                str(item.get("artifact_id"))
+                                for item in (run_result.get("current_artifacts") or [])
+                                if isinstance(item, dict) and item.get("artifact_id")
+                            ]
+                            manifest_record = build_artifact_record(
+                                path=trajectory_graph["manifest_path"],
+                                artifact_type="scientific_trajectory_manifest",
+                                created_by="scientific_trajectory_graph",
+                                trace_id=run_id,
+                                task_id=task_id,
+                                source_artifact_ids=source_artifact_ids,
+                                metadata={
+                                    "schema_version": trajectory_graph.get(
+                                        "schema_version"
+                                    ),
+                                    "node_count": trajectory_graph.get("node_count"),
+                                    "edge_count": trajectory_graph.get("edge_count"),
+                                    "privacy_safe": True,
+                                },
+                            )
+                            image_record = build_artifact_record(
+                                path=trajectory_graph["image_path"],
+                                artifact_type="scientific_trajectory_graph",
+                                created_by="scientific_trajectory_graph",
+                                trace_id=run_id,
+                                task_id=task_id,
+                                source_artifact_ids=[manifest_record["artifact_id"]],
+                                metadata={
+                                    "schema_version": trajectory_graph.get(
+                                        "schema_version"
+                                    ),
+                                    "render_format": "png",
+                                    "privacy_safe": True,
+                                },
+                            )
+                            report_record = build_artifact_record(
+                                path=trajectory_graph["report_path"],
+                                artifact_type="scientific_trajectory_report",
+                                created_by="scientific_trajectory_graph",
+                                trace_id=run_id,
+                                task_id=task_id,
+                                source_artifact_ids=[manifest_record["artifact_id"]],
+                                metadata={
+                                    "schema_version": trajectory_graph.get(
+                                        "schema_version"
+                                    ),
+                                    "render_format": "markdown",
+                                    "privacy_safe": True,
+                                },
+                            )
+                            for artifact_record in (
+                                manifest_record,
+                                image_record,
+                                report_record,
+                            ):
+                                evaluation_db.register_artifact(artifact_record)
+                                evaluation_db.save_trajectory_event(
+                                    build_trajectory_event(
+                                        event_type="artifact_registered",
+                                        trace_id=run_id,
+                                        task_id=task_id,
+                                        actor_type="control_plane",
+                                        actor_name="scientific_trajectory_graph",
+                                        status="success",
+                                        payload={
+                                            "artifact_id": artifact_record[
+                                                "artifact_id"
+                                            ],
+                                            "artifact_type": artifact_record[
+                                                "artifact_type"
+                                            ],
+                                            "sha256": artifact_record["sha256"],
+                                            "privacy_safe": True,
+                                        },
+                                    )
+                                )
+                        except Exception as graph_persist_error:
+                            print(
+                                "[Orchestrator] 注册科学轨迹图工件失败: "
+                                f"{graph_persist_error}"
+                            )
                     if task_id:
                         evaluation_db.update_task(
                             task_id=task_id,
@@ -897,6 +1015,12 @@ class MultiAgentOrchestrator:
             "selected_feature_paths": result.get("selected_feature_paths", {}),
             "pipeline_search_manifest_path": result.get(
                 "pipeline_search_manifest_path"
+            ),
+            "scientific_trajectory_graph": result.get(
+                "scientific_trajectory_graph", {}
+            ),
+            "scientific_trajectory_graph_error": result.get(
+                "scientific_trajectory_graph_error"
             ),
         }
 
