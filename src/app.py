@@ -515,6 +515,19 @@ def _chatbot_history_pairs(messages):
     return pairs
 
 
+def _chatbot_display_history(pairs):
+    """Adapt session pairs to the message-only Chatbot format in Gradio 6."""
+    if GRADIO_MAJOR_VERSION < 6:
+        return pairs
+    messages = []
+    for user_text, assistant_text in pairs:
+        if user_text is not None:
+            messages.append({"role": "user", "content": user_text})
+        if assistant_text is not None and assistant_text != "":
+            messages.append({"role": "assistant", "content": assistant_text})
+    return messages
+
+
 def _workspace_choices(db, user_id):
     return [
         (row["display_name"], row["workspace_id"])
@@ -928,7 +941,7 @@ def switch_workspace(workspace_id):
         active_run = _get_active_background_task(global_chatbot.user_id)
         input_update, file_update = _composer_updates(active_run)
         return (
-            _chatbot_history_pairs(global_chatbot.chat_history),
+            _chatbot_display_history(_chatbot_history_pairs(global_chatbot.chat_history)),
             "请选择一个工作区",
             workspace_dashboard_markdown(),
             gr.update(),
@@ -1905,7 +1918,7 @@ def _session_runtime_view(user_id, workspace_id, session_id):
         value=None,
         label=f"输出文件 ({len(output_files)})",
     )
-    return pairs, status, gallery_update, chart_images, download_update
+    return _chatbot_display_history(pairs), status, gallery_update, chart_images, download_update
 
 
 def _hidden_mesh_view(message=None):
@@ -2841,7 +2854,7 @@ TASK_INPUT_KEYBOARD_JS = r"""
 }
 """
 
-
+#创建整个聊天页面
 with gr.Blocks(
     title="KL 影像研究智能体",
     fill_height=True,
