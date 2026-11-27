@@ -9,6 +9,7 @@ wheels/
 # Virtual environments
 .venv
 oai_multi_agent_system/
+oai_multi_agent/
 
 # Environment (keep .env.example)
 .env

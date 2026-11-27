@@ -1,7 +1,12 @@
+param(
+    [string]$EnvironmentName = 'oai_multi_agent_system',
+    [int]$Port = 7860
+)
+
 $ErrorActionPreference = 'Stop'
-$pythonPath = Join-Path $PSScriptRoot 'oai_multi_agent_system\Scripts\python.exe'
+$pythonPath = Join-Path $PSScriptRoot "$EnvironmentName\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $pythonPath)) {
-    throw 'The oai_multi_agent_system environment is missing.'
+    throw "The $EnvironmentName environment is missing."
 }
 $mysqlRuntime = Join-Path $PSScriptRoot 'oai_multi_agent_system\mysql_runtime'
 $databaseConfigPath = Join-Path $PSScriptRoot 'src\db_utils\db_config.json'
@@ -35,7 +40,7 @@ if ((Test-Path -LiteralPath (Join-Path $mysqlRuntime 'data')) -and
 }
 Push-Location (Join-Path $PSScriptRoot 'src')
 try {
-    & $pythonPath app.py
+    & $pythonPath -m uvicorn app:app --host 127.0.0.1 --port $Port
     if ($LASTEXITCODE -ne 0) {
         throw "Application exited with code $LASTEXITCODE."
     }
